@@ -1,0 +1,15 @@
+pub const ValidationError = error{
+    EmptyInputPath,
+    MissingOutputPath,
+    EmptyOutputPath,
+    InputEqualsOutput,
+    NoTimestamps,
+    MissingOutputDirectory,
+    EmptyOutputPrefix,
+    InvalidBitrate,
+    InvalidSampleRate,
+    BitrateNotAllowedWithCopy,
+    SampleRateNotAllowedWithCopy,
+    ChannelsNotAllowedWithCopy,
+    DuplicateTimestamp,
+};

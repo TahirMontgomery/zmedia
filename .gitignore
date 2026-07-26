@@ -1,0 +1,6 @@
+zig-out/
+.zig-cache/
+output/
+*.o
+*.obj
+.DS_Store
