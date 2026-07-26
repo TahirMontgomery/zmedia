@@ -43,10 +43,6 @@ pub fn main(init: std.process.Init) !void {
     try stdout.flush();
 
     if (options.audio_output) |audio_output| {
-        if (std.fs.path.dirname(audio_output)) |directory| {
-            try Io.Dir.cwd().createDirPath(io, directory);
-        }
-
         var extraction = zmedia.audioExtraction(options.input_path);
         var result = try extraction
             .codec(.mp3)
@@ -85,14 +81,18 @@ pub fn main(init: std.process.Init) !void {
         defer batch.deinit(allocator);
 
         for (batch.items) |item| {
-            const formatted = try item.timestamp.formatAlloc(allocator);
-            defer allocator.free(formatted);
-
-            if (item.process.succeeded()) {
-                try stdout.print("  ✓ Captured screenshot at {s}\n", .{formatted});
+            try stdout.writeAll("  ");
+            if (item.written) {
+                try stdout.writeAll("✓ Captured screenshot at ");
             } else {
-                try stdout.print("  ✗ Failed screenshot at {s}\n", .{formatted});
+                try stdout.writeAll("✗ Failed screenshot at ");
             }
+            try item.timestamp.format(stdout);
+            try stdout.writeAll("\n");
+        }
+        if (!batch.process.succeeded() and batch.process.stderr.len > 0) {
+            try stderr.print("{s}\n", .{batch.process.stderr});
+            try stderr.flush();
         }
         try stdout.flush();
     }
@@ -160,17 +160,9 @@ fn printMediaSummary(writer: *Io.Writer, info: *const zmedia.MediaInfo) !void {
     try writer.writeAll("Media\n");
 
     if (info.duration) |duration| {
-        // formatAlloc needs an allocator; print components manually for the CLI summary.
-        const total_seconds = duration.microseconds / std.time.us_per_s;
-        const remainder_us = duration.microseconds % std.time.us_per_s;
-        const hours = total_seconds / 3600;
-        const minutes = (total_seconds % 3600) / 60;
-        const seconds = total_seconds % 60;
-        const milliseconds = remainder_us / std.time.us_per_ms;
-        try writer.print(
-            "  Duration: {d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}\n",
-            .{ hours, minutes, seconds, milliseconds },
-        );
+        try writer.writeAll("  Duration: ");
+        try duration.format(writer);
+        try writer.writeAll("\n");
     } else {
         try writer.writeAll("  Duration: unknown\n");
     }

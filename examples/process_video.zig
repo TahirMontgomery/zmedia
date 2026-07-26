@@ -13,8 +13,6 @@ pub fn main(init: std.process.Init) !void {
     var info = try zmedia.probe(allocator, io, input, .{});
     defer info.deinit(allocator);
 
-    try std.Io.Dir.cwd().createDirPath(io, "output");
-
     var audio = zmedia.audioExtraction(input);
     var audio_result = try audio
         .codec(.mp3)
@@ -41,10 +39,7 @@ pub fn main(init: std.process.Init) !void {
         .overwrite(true)
         .run(allocator, io);
     defer screenshot_results.deinit(allocator);
-
-    if (!screenshot_results.succeeded()) {
-        return error.ScreenshotExtractionFailed;
-    }
+    try screenshot_results.expectSuccess();
 
     std.debug.print("Processed {s}\n", .{input});
 }

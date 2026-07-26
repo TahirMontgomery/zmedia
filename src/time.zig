@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 
 pub const Timestamp = struct {
     microseconds: u64,
@@ -38,28 +39,50 @@ pub const Timestamp = struct {
         };
     }
 
-    pub fn formatAlloc(self: Timestamp, allocator: Allocator) ![]u8 {
-        const total_seconds = self.microseconds / std.time.us_per_s;
-        const remainder_us = self.microseconds % std.time.us_per_s;
-
-        const hours = total_seconds / 3600;
-        const minutes = (total_seconds % 3600) / 60;
-        const seconds = total_seconds % 60;
-        const milliseconds = remainder_us / std.time.us_per_ms;
-
-        return std.fmt.allocPrint(
-            allocator,
+    pub fn format(self: Timestamp, writer: *Io.Writer) !void {
+        const split = self.parts();
+        try writer.print(
             "{d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}",
             .{
-                hours,
-                minutes,
-                seconds,
-                milliseconds,
+                split.hours,
+                split.minutes,
+                split.seconds,
+                split.milliseconds,
             },
         );
     }
 
+    pub fn formatBuf(self: Timestamp, buffer: []u8) ![]u8 {
+        var fixed = Io.Writer.fixed(buffer);
+        try self.format(&fixed);
+        return fixed.buffered();
+    }
+
+    pub fn formatAlloc(self: Timestamp, allocator: Allocator) ![]u8 {
+        var buffer: [32]u8 = undefined;
+        const formatted = try self.formatBuf(&buffer);
+        return try allocator.dupe(u8, formatted);
+    }
+
     pub fn eql(self: Timestamp, other: Timestamp) bool {
         return self.microseconds == other.microseconds;
+    }
+
+    const Parts = struct {
+        hours: u64,
+        minutes: u64,
+        seconds: u64,
+        milliseconds: u64,
+    };
+
+    fn parts(self: Timestamp) Parts {
+        const total_seconds = self.microseconds / std.time.us_per_s;
+        const remainder_us = self.microseconds % std.time.us_per_s;
+        return .{
+            .hours = total_seconds / 3600,
+            .minutes = (total_seconds % 3600) / 60,
+            .seconds = total_seconds % 60,
+            .milliseconds = remainder_us / std.time.us_per_ms,
+        };
     }
 };

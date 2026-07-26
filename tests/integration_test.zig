@@ -26,8 +26,6 @@ test "extract audio from fixture" {
     const io = std.testing.io;
     const output = "zig-out/tmp/integration-audio.mp3";
 
-    try std.Io.Dir.cwd().createDirPath(io, "zig-out/tmp");
-
     var job = zmedia.audioExtraction(fixture_path);
     var result = try job
         .codec(.mp3)

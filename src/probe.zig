@@ -4,13 +4,13 @@ const Io = std.Io;
 
 const audio = @import("audio.zig");
 const command_mod = @import("command.zig");
-const executor_mod = @import("executor.zig");
+const common = @import("operations/common.zig");
 const runtime_mod = @import("runtime.zig");
 const time = @import("time.zig");
 
 const AudioCodec = audio.AudioCodec;
 const Command = command_mod.Command;
-const Executor = executor_mod.Executor;
+const Runtime = runtime_mod.Runtime;
 const RuntimeConfig = runtime_mod.RuntimeConfig;
 const Timestamp = time.Timestamp;
 
@@ -129,22 +129,23 @@ pub fn probe(
     input_path: []const u8,
     config: RuntimeConfig,
 ) !MediaInfo {
-    if (input_path.len == 0) {
-        return error.EmptyInputPath;
-    }
+    try common.requireNonEmptyInput(input_path);
 
-    var command = Command.init(allocator, config.ffprobe_path);
+    // ffprobe emits JSON on stdout.
+    var probe_config = config;
+    probe_config.capture_stdout = true;
+
+    var command = Command.init(allocator, probe_config.ffprobe_path);
     defer command.deinit();
 
-    try command.append("-v");
-    try command.append("error");
+    try command.appendPair("-v", "error");
     try command.append("-show_format");
     try command.append("-show_streams");
-    try command.append("-of");
-    try command.append("json");
+    try command.appendPair("-of", "json");
     try command.append(input_path);
 
-    var run_result = try Executor.init(config).run(allocator, io, &command);
+    const runtime = Runtime.init(io, probe_config);
+    var run_result = try runtime.run(allocator, &command);
     defer run_result.deinit(allocator);
 
     const process = run_result.process();
@@ -268,6 +269,18 @@ pub const InstallationInfo = struct {
     }
 };
 
+pub const Tool = enum {
+    ffmpeg,
+    ffprobe,
+
+    pub fn path(self: Tool, config: RuntimeConfig) []const u8 {
+        return switch (self) {
+            .ffmpeg => config.ffmpeg_path,
+            .ffprobe => config.ffprobe_path,
+        };
+    }
+};
+
 pub fn checkInstallation(
     allocator: Allocator,
     io: Io,
@@ -281,10 +294,10 @@ pub fn checkInstallation(
     };
     errdefer info.deinit(allocator);
 
-    info.ffmpeg_version = try probeBinaryVersion(allocator, io, config.ffmpeg_path);
+    info.ffmpeg_version = try probeBinaryVersion(allocator, io, config, .ffmpeg);
     info.ffmpeg_available = info.ffmpeg_version != null;
 
-    info.ffprobe_version = try probeBinaryVersion(allocator, io, config.ffprobe_path);
+    info.ffprobe_version = try probeBinaryVersion(allocator, io, config, .ffprobe);
     info.ffprobe_available = info.ffprobe_version != null;
 
     return info;
@@ -293,13 +306,19 @@ pub fn checkInstallation(
 fn probeBinaryVersion(
     allocator: Allocator,
     io: Io,
-    binary_path: []const u8,
+    config: RuntimeConfig,
+    tool: Tool,
 ) !?[]u8 {
-    var command = Command.init(allocator, binary_path);
+    var version_config = config;
+    version_config.capture_stdout = true;
+    version_config.capture_stderr = true;
+
+    var command = Command.init(allocator, tool.path(config));
     defer command.deinit();
     try command.append("-version");
 
-    var run_result = Executor.init(.{}).run(allocator, io, &command) catch {
+    const runtime = Runtime.init(io, version_config);
+    var run_result = runtime.run(allocator, &command) catch {
         return null;
     };
     defer run_result.deinit(allocator);

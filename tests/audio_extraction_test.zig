@@ -1,5 +1,6 @@
 const std = @import("std");
 const zmedia = @import("zmedia");
+const helpers = @import("test_helpers.zig");
 
 test "audio codec ffmpeg names" {
     try std.testing.expectEqualStrings("copy", zmedia.AudioCodec.copy.ffmpegName());
@@ -32,7 +33,7 @@ test "mp3 audio extraction builds expected arguments" {
     defer built.deinit();
 
     try std.testing.expectEqualStrings("ffmpeg", built.executable);
-    try expectArgv(
+    try helpers.expectArgv(
         &.{
             "-y",
             "-i",
@@ -46,13 +47,6 @@ test "mp3 audio extraction builds expected arguments" {
         },
         built.argv(),
     );
-}
-
-fn expectArgv(expected: []const []const u8, actual: []const []const u8) !void {
-    try std.testing.expectEqual(expected.len, actual.len);
-    for (expected, actual) |want, got| {
-        try std.testing.expectEqualStrings(want, got);
-    }
 }
 
 test "copy codec rejects bitrate" {

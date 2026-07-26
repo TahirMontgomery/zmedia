@@ -1,5 +1,6 @@
 const std = @import("std");
 const zmedia = @import("zmedia");
+const helpers = @import("test_helpers.zig");
 
 test "image format mappings" {
     try std.testing.expectEqualStrings("jpg", zmedia.ImageFormat.jpeg.extension());
@@ -19,9 +20,10 @@ test "screenshot output path generation" {
     try std.testing.expectEqualStrings("screenshots/frame-001.jpg", path);
 }
 
-test "screenshot command includes seek and quality" {
+test "screenshot build emits one multi-output command" {
     const stamps = [_]zmedia.Timestamp{
         zmedia.Timestamp.fromSeconds(5),
+        zmedia.Timestamp.fromSeconds(20),
     };
 
     var job = zmedia.ScreenshotExtraction.init("video.mp4");
@@ -33,21 +35,16 @@ test "screenshot command includes seek and quality" {
         .prefix("frame")
         .overwrite(true);
 
-    var built = try job.buildForTimestamp(
-        std.testing.allocator,
-        .{},
-        stamps[0],
-        "screenshots/frame-001.jpg",
-    );
+    var built = try job.build(std.testing.allocator, .{});
     defer built.deinit();
 
-    try expectArgv(
+    try helpers.expectArgv(
         &.{
             "-y",
-            "-ss",
-            "00:00:05.000",
             "-i",
             "video.mp4",
+            "-ss",
+            "00:00:05.000",
             "-frames:v",
             "1",
             "-c:v",
@@ -55,20 +52,37 @@ test "screenshot command includes seek and quality" {
             "-q:v",
             "3",
             "screenshots/frame-001.jpg",
+            "-ss",
+            "00:00:20.000",
+            "-frames:v",
+            "1",
+            "-c:v",
+            "mjpeg",
+            "-q:v",
+            "3",
+            "screenshots/frame-002.jpg",
         },
         built.argv(),
     );
-}
-
-fn expectArgv(expected: []const []const u8, actual: []const []const u8) !void {
-    try std.testing.expectEqual(expected.len, actual.len);
-    for (expected, actual) |want, got| {
-        try std.testing.expectEqualStrings(want, got);
-    }
 }
 
 test "screenshot validation requires timestamps" {
     var job = zmedia.ScreenshotExtraction.init("video.mp4");
     _ = job.outputDirectory("screenshots");
     try std.testing.expectError(error.NoTimestamps, job.validate());
+}
+
+test "rejectDuplicates setter validates duplicates" {
+    const stamps = [_]zmedia.Timestamp{
+        zmedia.Timestamp.fromSeconds(5),
+        zmedia.Timestamp.fromSeconds(5),
+    };
+
+    var job = zmedia.ScreenshotExtraction.init("video.mp4");
+    _ = job
+        .timestamps(&stamps)
+        .outputDirectory("screenshots")
+        .rejectDuplicates(true);
+
+    try std.testing.expectError(error.DuplicateTimestamp, job.validate());
 }

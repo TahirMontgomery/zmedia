@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 /// Owned argument list for an external process.
-/// Every argument is duplicated into command-owned memory.
+/// Every argument is owned by the command unless noted otherwise.
 pub const Command = struct {
     allocator: Allocator,
     executable: []const u8,
@@ -31,14 +31,34 @@ pub const Command = struct {
         try self.arguments.append(self.allocator, owned);
     }
 
+    /// Takes ownership of `value` (must be allocated with this command's allocator).
+    pub fn appendOwned(self: *Command, value: []u8) !void {
+        errdefer self.allocator.free(value);
+        try self.arguments.append(self.allocator, value);
+    }
+
     pub fn appendFormat(
         self: *Command,
         comptime fmt: []const u8,
         args: anytype,
     ) !void {
         const owned = try std.fmt.allocPrint(self.allocator, fmt, args);
-        errdefer self.allocator.free(owned);
-        try self.arguments.append(self.allocator, owned);
+        try self.appendOwned(owned);
+    }
+
+    pub fn appendPair(self: *Command, flag: []const u8, value: []const u8) !void {
+        try self.append(flag);
+        try self.append(value);
+    }
+
+    pub fn appendPairFormat(
+        self: *Command,
+        flag: []const u8,
+        comptime fmt: []const u8,
+        args: anytype,
+    ) !void {
+        try self.append(flag);
+        try self.appendFormat(fmt, args);
     }
 
     /// Returns the argument list without the executable.
@@ -52,6 +72,7 @@ pub const Command = struct {
         var list: std.ArrayList([]const u8) = .empty;
         errdefer list.deinit(allocator);
 
+        try list.ensureTotalCapacity(allocator, self.arguments.items.len + 1);
         try list.append(allocator, self.executable);
         try list.appendSlice(allocator, self.arguments.items);
         return try list.toOwnedSlice(allocator);

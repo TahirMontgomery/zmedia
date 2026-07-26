@@ -11,6 +11,7 @@ pub const validation = @import("validation.zig");
 pub const probe_mod = @import("probe.zig");
 
 pub const operations = struct {
+    pub const common = @import("operations/common.zig");
     pub const audio_extraction = @import("operations/audio_extraction.zig");
     pub const screenshot_extraction = @import("operations/screenshot_extraction.zig");
 };
@@ -35,6 +36,7 @@ pub const VideoStream = probe_mod.VideoStream;
 pub const AudioStream = probe_mod.AudioStream;
 pub const Rational = probe_mod.Rational;
 pub const InstallationInfo = probe_mod.InstallationInfo;
+pub const Tool = probe_mod.Tool;
 
 pub const RunResult = executor.RunResult;
 pub const ProcessResult = executor.ProcessResult;
@@ -82,6 +84,7 @@ test {
     _ = runtime;
     _ = validation;
     _ = probe_mod;
+    _ = operations.common;
     _ = operations.audio_extraction;
     _ = operations.screenshot_extraction;
 }

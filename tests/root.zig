@@ -1,6 +1,5 @@
-const std = @import("std");
-
 test {
+    _ = @import("test_helpers.zig");
     _ = @import("command_test.zig");
     _ = @import("timestamp_test.zig");
     _ = @import("audio_extraction_test.zig");

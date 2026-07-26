@@ -21,4 +21,8 @@ test "timestamp formatting preserves milliseconds" {
     const formatted = try stamp.formatAlloc(std.testing.allocator);
     defer std.testing.allocator.free(formatted);
     try std.testing.expectEqualStrings("00:01:15.500", formatted);
+
+    var buffer: [32]u8 = undefined;
+    const buffered = try stamp.formatBuf(&buffer);
+    try std.testing.expectEqualStrings("00:01:15.500", buffered);
 }

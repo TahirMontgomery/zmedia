@@ -11,6 +11,8 @@ Requires **Zig 0.16** and a local FFmpeg/FFprobe installation for process execut
 - Typed builders for audio extraction, screenshot extraction, and media probing
 - Safe argument-list command construction (not shell strings)
 - Validation before FFmpeg starts
+- Single-process multi-output screenshot extraction
+- `Runtime` execution seam with configurable binary paths and stream capture
 - Structured stdout/stderr/exit-code/elapsed-time results
 - Unit tests that do not require FFmpeg
 - Integration tests and a sample video workflow CLI
@@ -74,12 +76,38 @@ pub fn main(init: std.process.Init) !void {
         .overwrite(true)
         .run(allocator, io);
     defer screenshot_results.deinit(allocator);
-
-    if (!screenshot_results.succeeded()) {
-        return error.ScreenshotExtractionFailed;
-    }
+    try screenshot_results.expectSuccess();
 }
 ```
+
+## Runtime and capture defaults
+
+`.run(allocator, io)` uses `Runtime.init(io, .{})`. For custom binary paths or capture settings, use `.runWith`:
+
+```zig
+const runtime = zmedia.Runtime.init(io, .{
+    .ffmpeg_path = "/opt/homebrew/bin/ffmpeg",
+    .ffprobe_path = "/opt/homebrew/bin/ffprobe",
+    .capture_stdout = false, // default
+    .capture_stderr = true,  // default
+});
+
+var result = try job.runWith(allocator, runtime);
+```
+
+Defaults discard stdout (ffmpeg writes media to files) and keep stderr for diagnostics. Probe and installation checks enable stdout capture automatically.
+
+## Screenshots: one process, many outputs
+
+Screenshot extraction builds a single multi-output ffmpeg command:
+
+```text
+ffmpeg -y -i video.mp4 \
+  -ss 00:00:05.000 -frames:v 1 -c:v mjpeg -q:v 3 screenshots/frame-001.jpg \
+  -ss 00:00:20.000 -frames:v 1 -c:v mjpeg -q:v 3 screenshots/frame-002.jpg
+```
+
+The batch result holds one shared `ProcessResult` plus per-frame `written` flags.
 
 ## CLI: `zmedia-process`
 
@@ -98,7 +126,7 @@ Inspecting fixtures/sample.mp4...
 Media
   Duration: 00:00:05.000
   Video: h264, 320x240
-  Audio: aac, 44100 Hz, stereo
+  Audio: aac, 44100 Hz, mono
 
 Processing
   ✓ Extracted audio to output/audio.mp3
@@ -151,7 +179,7 @@ zig build run-process_video -- fixtures/sample.mp4
 | Constructor | Builder |
 |---|---|
 | `audioExtraction(path)` | codec, bitrate, channels, sampleRate, overwrite, output |
-| `screenshotExtraction(path)` | timestamps, format, quality, outputDirectory, prefix, overwrite |
+| `screenshotExtraction(path)` | timestamps, format, quality, outputDirectory, prefix, overwrite, rejectDuplicates |
 | `probe(allocator, io, path, config)` | returns `MediaInfo` |
 
 Custom binary paths:

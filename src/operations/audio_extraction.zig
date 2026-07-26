@@ -4,6 +4,7 @@ const Io = std.Io;
 
 const audio = @import("../audio.zig");
 const command_mod = @import("../command.zig");
+const common = @import("common.zig");
 const executor_mod = @import("../executor.zig");
 const runtime_mod = @import("../runtime.zig");
 const validation = @import("../validation.zig");
@@ -13,8 +14,8 @@ const AudioChannels = audio.AudioChannels;
 const AudioCodec = audio.AudioCodec;
 const SampleRate = audio.SampleRate;
 const Command = command_mod.Command;
-const Executor = executor_mod.Executor;
 const RunResult = executor_mod.RunResult;
+const Runtime = runtime_mod.Runtime;
 const RuntimeConfig = runtime_mod.RuntimeConfig;
 const ValidationError = validation.ValidationError;
 
@@ -66,9 +67,7 @@ pub const AudioExtraction = struct {
     }
 
     pub fn validate(self: *const AudioExtraction) ValidationError!void {
-        if (self.input_path.len == 0) {
-            return error.EmptyInputPath;
-        }
+        try common.requireNonEmptyInput(self.input_path);
 
         const output_path = self.output_path orelse {
             return error.MissingOutputPath;
@@ -117,33 +116,23 @@ pub const AudioExtraction = struct {
         var command = Command.init(allocator, config.ffmpeg_path);
         errdefer command.deinit();
 
-        if (self.overwrite_existing) {
-            try command.append("-y");
-        } else {
-            try command.append("-n");
-        }
-
-        try command.append("-i");
-        try command.append(self.input_path);
+        try common.appendOverwriteFlag(&command, self.overwrite_existing);
+        try command.appendPair("-i", self.input_path);
         try command.append("-vn");
-        try command.append("-c:a");
-        try command.append(self.codec_value.ffmpegName());
+        try command.appendPair("-c:a", self.codec_value.ffmpegName());
 
         if (self.bitrate_value) |bitrate_value| {
             const value = try bitrate_value.format(allocator);
-            defer allocator.free(value);
             try command.append("-b:a");
-            try command.append(value);
+            try command.appendOwned(value);
         }
 
         if (self.channels_value) |channels_value| {
-            try command.append("-ac");
-            try command.appendFormat("{d}", .{channels_value.count()});
+            try command.appendPairFormat("-ac", "{d}", .{channels_value.count()});
         }
 
         if (self.sample_rate_value) |sample_rate_value| {
-            try command.append("-ar");
-            try command.appendFormat("{d}", .{sample_rate_value.hz});
+            try command.appendPairFormat("-ar", "{d}", .{sample_rate_value.hz});
         }
 
         try command.append(self.output_path.?);
@@ -155,7 +144,7 @@ pub const AudioExtraction = struct {
         allocator: Allocator,
         io: Io,
     ) !RunResult {
-        return self.runWithConfig(allocator, io, .{});
+        return self.runWith(allocator, Runtime.init(io, .{}));
     }
 
     pub fn runWithConfig(
@@ -164,9 +153,19 @@ pub const AudioExtraction = struct {
         io: Io,
         config: RuntimeConfig,
     ) !RunResult {
-        var built = try self.build(allocator, config);
+        return self.runWith(allocator, Runtime.init(io, config));
+    }
+
+    pub fn runWith(
+        self: *const AudioExtraction,
+        allocator: Allocator,
+        runtime: Runtime,
+    ) !RunResult {
+        try self.validate();
+        try common.ensureParentDir(runtime.io, self.output_path.?);
+        var built = try self.build(allocator, runtime.config);
         defer built.deinit();
-        return Executor.init(config).run(allocator, io, &built);
+        return common.runBuilt(runtime, allocator, &built);
     }
 
     pub fn printCommand(
