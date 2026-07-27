@@ -3,40 +3,19 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 const audio = @import("audio.zig");
-const command_mod = @import("command.zig");
+const command_mod = @import("process/command.zig");
 const common = @import("operations/common.zig");
-const runtime_mod = @import("runtime.zig");
+const runtime_mod = @import("process/runtime.zig");
 const time = @import("time.zig");
+const formats = @import("formats/root.zig");
 
 const AudioCodec = audio.AudioCodec;
 const Command = command_mod.Command;
-const Runtime = runtime_mod.Runtime;
-const RuntimeConfig = runtime_mod.RuntimeConfig;
+const ProcessRuntime = runtime_mod.ProcessRuntime;
+const ProcessConfig = runtime_mod.ProcessConfig;
 const Timestamp = time.Timestamp;
 
-pub const Rational = struct {
-    numerator: u32,
-    denominator: u32,
-
-    pub fn asFloat(self: Rational) ?f64 {
-        if (self.denominator == 0) {
-            return null;
-        }
-        return @as(f64, @floatFromInt(self.numerator)) /
-            @as(f64, @floatFromInt(self.denominator));
-    }
-
-    pub fn parse(value: []const u8) ?Rational {
-        const slash = std.mem.indexOfScalar(u8, value, '/') orelse {
-            const number = std.fmt.parseInt(u32, value, 10) catch return null;
-            return .{ .numerator = number, .denominator = 1 };
-        };
-
-        const numerator = std.fmt.parseInt(u32, value[0..slash], 10) catch return null;
-        const denominator = std.fmt.parseInt(u32, value[slash + 1 ..], 10) catch return null;
-        return .{ .numerator = numerator, .denominator = denominator };
-    }
-};
+pub const Rational = formats.Rational;
 
 pub const VideoStream = struct {
     index: u32,
@@ -127,7 +106,7 @@ pub fn probe(
     allocator: Allocator,
     io: Io,
     input_path: []const u8,
-    config: RuntimeConfig,
+    config: ProcessConfig,
 ) !MediaInfo {
     try common.requireNonEmptyInput(input_path);
 
@@ -144,7 +123,7 @@ pub fn probe(
     try command.appendPair("-of", "json");
     try command.append(input_path);
 
-    const runtime = Runtime.init(io, probe_config);
+    const runtime = ProcessRuntime.init(io, probe_config);
     var run_result = try runtime.run(allocator, &command);
     defer run_result.deinit(allocator);
 
@@ -273,7 +252,7 @@ pub const Tool = enum {
     ffmpeg,
     ffprobe,
 
-    pub fn path(self: Tool, config: RuntimeConfig) []const u8 {
+    pub fn path(self: Tool, config: ProcessConfig) []const u8 {
         return switch (self) {
             .ffmpeg => config.ffmpeg_path,
             .ffprobe => config.ffprobe_path,
@@ -284,7 +263,7 @@ pub const Tool = enum {
 pub fn checkInstallation(
     allocator: Allocator,
     io: Io,
-    config: RuntimeConfig,
+    config: ProcessConfig,
 ) !InstallationInfo {
     var info = InstallationInfo{
         .ffmpeg_available = false,
@@ -306,7 +285,7 @@ pub fn checkInstallation(
 fn probeBinaryVersion(
     allocator: Allocator,
     io: Io,
-    config: RuntimeConfig,
+    config: ProcessConfig,
     tool: Tool,
 ) !?[]u8 {
     var version_config = config;
@@ -317,7 +296,7 @@ fn probeBinaryVersion(
     defer command.deinit();
     try command.append("-version");
 
-    const runtime = Runtime.init(io, version_config);
+    const runtime = ProcessRuntime.init(io, version_config);
     var run_result = runtime.run(allocator, &command) catch {
         return null;
     };

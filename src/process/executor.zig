@@ -6,7 +6,7 @@ const command_mod = @import("command.zig");
 const runtime_mod = @import("runtime.zig");
 
 const Command = command_mod.Command;
-const RuntimeConfig = runtime_mod.RuntimeConfig;
+const ProcessConfig = runtime_mod.ProcessConfig;
 
 pub const ProcessResult = struct {
     exit_code: u8,
@@ -59,11 +59,11 @@ pub const RunResult = union(enum) {
     }
 };
 
-/// Thin wrapper kept for compatibility; prefer `Runtime.run`.
+/// Thin wrapper kept for compatibility; prefer `ProcessRuntime.run`.
 pub const Executor = struct {
-    config: RuntimeConfig = .{},
+    config: ProcessConfig = .{},
 
-    pub fn init(config: RuntimeConfig) Executor {
+    pub fn init(config: ProcessConfig) Executor {
         return .{ .config = config };
     }
 
@@ -80,7 +80,7 @@ pub const Executor = struct {
 pub fn run(
     allocator: Allocator,
     io: Io,
-    config: RuntimeConfig,
+    config: ProcessConfig,
     command: *const Command,
 ) !RunResult {
     return runCommand(allocator, io, config, command);
@@ -89,7 +89,7 @@ pub fn run(
 fn runCommand(
     allocator: Allocator,
     io: Io,
-    config: RuntimeConfig,
+    config: ProcessConfig,
     command: *const Command,
 ) !RunResult {
     const full_argv = try command.fullArgv(allocator);

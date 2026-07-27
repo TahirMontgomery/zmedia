@@ -2,6 +2,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
+const Rational = @import("formats/rational.zig").Rational;
+
 pub const Timestamp = struct {
     microseconds: u64,
 
@@ -37,6 +39,18 @@ pub const Timestamp = struct {
         return .{
             .microseconds = @intFromFloat(@min(micros, @as(f64, @floatFromInt(std.math.maxInt(u64))))),
         };
+    }
+
+    /// Convert a presentation timestamp using an FFmpeg-style time base.
+    pub fn fromPts(pts: i64, time_base: Rational) Timestamp {
+        if (pts == std.math.minInt(i64) or pts < 0 or time_base.denominator == 0) {
+            return .{ .microseconds = 0 };
+        }
+        const num: i128 = @as(i128, pts) * @as(i128, time_base.numerator) * std.time.us_per_s;
+        const den: i128 = time_base.denominator;
+        const micros = @divTrunc(num, den);
+        if (micros <= 0) return .{ .microseconds = 0 };
+        return .{ .microseconds = @intCast(@min(micros, std.math.maxInt(u64))) };
     }
 
     pub fn format(self: Timestamp, writer: *Io.Writer) !void {

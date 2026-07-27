@@ -3,10 +3,10 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 const audio = @import("../audio.zig");
-const command_mod = @import("../command.zig");
+const command_mod = @import("../process/command.zig");
 const common = @import("common.zig");
-const executor_mod = @import("../executor.zig");
-const runtime_mod = @import("../runtime.zig");
+const executor_mod = @import("../process/executor.zig");
+const runtime_mod = @import("../process/runtime.zig");
 const validation = @import("../validation.zig");
 
 const AudioBitrate = audio.AudioBitrate;
@@ -15,8 +15,8 @@ const AudioCodec = audio.AudioCodec;
 const SampleRate = audio.SampleRate;
 const Command = command_mod.Command;
 const RunResult = executor_mod.RunResult;
-const Runtime = runtime_mod.Runtime;
-const RuntimeConfig = runtime_mod.RuntimeConfig;
+const ProcessRuntime = runtime_mod.ProcessRuntime;
+const ProcessConfig = runtime_mod.ProcessConfig;
 const ValidationError = validation.ValidationError;
 
 pub const AudioExtraction = struct {
@@ -109,7 +109,7 @@ pub const AudioExtraction = struct {
     pub fn build(
         self: *const AudioExtraction,
         allocator: Allocator,
-        config: RuntimeConfig,
+        config: ProcessConfig,
     ) !Command {
         try self.validate();
 
@@ -144,22 +144,22 @@ pub const AudioExtraction = struct {
         allocator: Allocator,
         io: Io,
     ) !RunResult {
-        return self.runWith(allocator, Runtime.init(io, .{}));
+        return self.runWith(allocator, ProcessRuntime.init(io, .{}));
     }
 
     pub fn runWithConfig(
         self: *const AudioExtraction,
         allocator: Allocator,
         io: Io,
-        config: RuntimeConfig,
+        config: ProcessConfig,
     ) !RunResult {
-        return self.runWith(allocator, Runtime.init(io, config));
+        return self.runWith(allocator, ProcessRuntime.init(io, config));
     }
 
     pub fn runWith(
         self: *const AudioExtraction,
         allocator: Allocator,
-        runtime: Runtime,
+        runtime: ProcessRuntime,
     ) !RunResult {
         try self.validate();
         try common.ensureParentDir(runtime.io, self.output_path.?);
@@ -172,7 +172,7 @@ pub const AudioExtraction = struct {
         self: *const AudioExtraction,
         allocator: Allocator,
         writer: *Io.Writer,
-        config: RuntimeConfig,
+        config: ProcessConfig,
     ) !void {
         var built = try self.build(allocator, config);
         defer built.deinit();

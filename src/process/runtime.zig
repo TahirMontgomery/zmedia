@@ -8,7 +8,8 @@ const executor_mod = @import("executor.zig");
 const Command = command_mod.Command;
 const RunResult = executor_mod.RunResult;
 
-pub const RuntimeConfig = struct {
+/// Configuration for spawning ffmpeg / ffprobe processes.
+pub const ProcessConfig = struct {
     ffmpeg_path: []const u8 = "ffmpeg",
     ffprobe_path: []const u8 = "ffprobe",
     /// ffmpeg typically writes media to files, not stdout.
@@ -17,11 +18,13 @@ pub const RuntimeConfig = struct {
     capture_stderr: bool = true,
 };
 
-pub const Runtime = struct {
+/// Process-backed execution seam (CLI ffmpeg/ffprobe).
+/// Library-backed APIs live under `zmedia.runtime` and must not share this name.
+pub const ProcessRuntime = struct {
     io: Io,
-    config: RuntimeConfig,
+    config: ProcessConfig,
 
-    pub fn init(io: Io, config: RuntimeConfig) Runtime {
+    pub fn init(io: Io, config: ProcessConfig) ProcessRuntime {
         return .{
             .io = io,
             .config = config,
@@ -29,7 +32,7 @@ pub const Runtime = struct {
     }
 
     pub fn run(
-        self: Runtime,
+        self: ProcessRuntime,
         allocator: Allocator,
         command: *const Command,
     ) !RunResult {

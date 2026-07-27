@@ -3,8 +3,8 @@ const zmedia = @import("zmedia");
 
 test "rational parsing" {
     const rate = zmedia.Rational.parse("30/1").?;
-    try std.testing.expectEqual(@as(u32, 30), rate.numerator);
-    try std.testing.expectEqual(@as(u32, 1), rate.denominator);
+    try std.testing.expectEqual(@as(i32, 30), rate.numerator);
+    try std.testing.expectEqual(@as(i32, 1), rate.denominator);
     try std.testing.expectEqual(@as(f64, 30.0), rate.asFloat().?);
 }
 
