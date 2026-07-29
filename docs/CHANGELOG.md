@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.0 — 2026-07-28
+
+### Added
+- `Demuxer` / `DemuxerOptions` — single demux cursor with optional `CancelToken`
+- Packet-driven `VideoDecoder` / `AudioDecoder`: `sendPacket` (borrow), `sendFlush`,
+  `receiveFrame`; `setCancel` for convenience `nextFrame`
+- `AudioResampler.flush` / `flushInto` / `convertInto` and `ConvertIntoResult`
+- Sprint 4 handoff: `docs/handoffs/ember-sprint4-av-demux.md`
+
+### Changed
+- Documented that two `nextFrame` consumers (or `Demuxer` + `nextFrame`) on one
+  `MediaInput` are unsupported; use packet APIs for A/V
+
+### Docs
+- `FRAME_LIFETIME.md` covers packet-driven decode and resampler flush
+
 ## 0.4.0 — 2026-07-28
 
 ### Added

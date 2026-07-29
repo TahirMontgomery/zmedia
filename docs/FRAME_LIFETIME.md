@@ -1,63 +1,68 @@
-# VideoFrame / AudioFrame Lifetime
+# VideoFrame / AudioFrame / Packet Lifetime
+
+## Shared demux (A/V)
+
+For files with both video and audio, use **`Demuxer`** + packet-driven decode:
+
+```text
+Demuxer.nextPacket → Packet
+  → VideoDecoder.sendPacket / AudioDecoder.sendPacket  (borrow)
+  → receiveFrame until null
+Packet.deinit (caller)
+… EOS …
+sendFlush → receiveFrame until null
+AudioResampler.flush → drain delay samples
+```
+
+- **One demux cursor** per `MediaInput`. Do not run two `nextFrame` consumers, or a
+  `Demuxer` plus `nextFrame`, on the same open input — they share `av_read_frame` and
+  will drop each other’s packets.
+- `nextFrame` remains a **single-stream convenience** (video-only or audio-only apps).
+
+### Packet ownership
+
+`sendPacket` **borrows** the packet for the duration of the call. The caller keeps the
+`Packet` alive through `sendPacket` and then calls `Packet.deinit`. The decoder does not
+take ownership or free the caller’s `AVPacket`.
 
 ## VideoFrame (decoded)
 
-`VideoDecoder.nextFrame()` returns a `VideoFrame` whose pixel planes borrow memory from an
-internal `AVFrame` (`FrameStorage.borrowed_avframe`).
+`VideoDecoder.receiveFrame` / `nextFrame` returns a `VideoFrame` whose pixel planes borrow
+memory from an internal `AVFrame` (`FrameStorage.borrowed_avframe`).
 
 Rules:
 
-1. Call `frame.deinit()` when finished with a frame.
-2. Do **not** call `nextFrame()` again while holding a previous borrowed frame from the same
-   decoder unless you have already `deinit`'d it. The current implementation allocates a new
-   `AVFrame` per successful decode, so multiple outstanding frames are allowed, but you must
-   still free each one.
-3. Plane pointers (`frame.planes[i].data`) are invalid after `deinit`.
-4. Ember may copy plane bytes into a GPU texture before releasing the frame.
+1. Call `frame.deinit()` when finished.
+2. Plane pointers are invalid after `deinit`.
+3. Multiple outstanding borrowed frames from separate `AVFrame` allocations are allowed;
+   each must still be freed.
 
 ### Plane sizing
 
-`Plane.data.len` is the usable byte length for that plane (including row padding implied by
-`line_size × plane_height`). Heights/widths follow the pixel format’s chroma subsampling
-(`av_image_fill_plane_sizes` / `log2_chroma_*`):
-
-| Format | Luma | Chroma height | Notes |
-|---|---|---|---|
-| `yuv420p` / `nv12` | H | H/2 | nv12: semi-planar UV in plane 1 |
-| `yuv422p` | H | H | chroma width W/2 |
-| `yuv444p` | H | H | full chroma |
-| `rgba` / `rgb24` / … | H | n/a | single packed plane |
-
-`line_size` may be larger than the active row width (alignment padding). Prefer
-`plane.data.len` for bounds checks; use `line_size` for row strides.
+`Plane.data.len` is the usable byte length for that plane. See chroma table in prior docs /
+`av_image_fill_plane_sizes`. Prefer `.len` for bounds checks; `line_size` for row strides.
 
 ## VideoFrame (converted)
 
-`VideoConverter.convert` returns an **owned** `VideoFrame` (`FrameStorage.owned_bytes`) in a
-packed RGB format (typically `.rgba`). That buffer remains valid after the source decoded
-frame’s `deinit`. Call `converted.deinit()` when finished.
-
-`convertInto` writes into a caller-owned buffer and does not allocate a `VideoFrame`.
+`VideoConverter.convert` returns an **owned** frame. Valid after source `deinit`.
 
 ## AudioFrame
 
-`AudioDecoder.nextFrame()` returns an `AudioFrame` with **owned** sample bytes
-(`FrameStorage.owned_bytes`). The underlying `AVFrame` is freed during conversion.
+Decoded and resampled audio frames use **owned** bytes. Valid across subsequent
+`receiveFrame` / `convert` calls until `deinit`.
 
-Rules:
+`AudioResampler.flush` returns owned frames (or null when drained). Flush timestamps use
+the **last input PTS**. After a final null flush, further flush returns null.
 
-1. Call `frame.deinit()` to free the owned buffer.
-2. Frames remain valid across subsequent `nextFrame()` calls until `deinit`.
-3. `AudioResampler.convert` returns a new owned `AudioFrame`; both input and output must be
-   released by the caller when done.
+`convertInto` / `flushInto` write into caller buffers (`ConvertIntoResult`).
 
 ## Ownership summary
 
-| Type | Storage | Valid after source `deinit`? |
+| Type | Storage | Notes |
 |---|---|---|
-| Decoded `VideoFrame` | borrowed AVFrame | No |
-| Converted `VideoFrame` | owned bytes | Yes (independent of source) |
-| `AudioFrame` | owned bytes | Yes |
-| `Packet` | owned AVPacket | until `deinit` |
+| `Packet` | owned AVPacket | caller `deinit` after `sendPacket` |
+| Decoded `VideoFrame` | borrowed AVFrame | until `deinit` |
+| Converted `VideoFrame` | owned bytes | independent of source |
+| `AudioFrame` | owned bytes | until `deinit` |
 
-No frame pools in v1. Measure copies before adding pooling.
+No frame pools in v1.

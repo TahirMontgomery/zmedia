@@ -16,6 +16,7 @@ See [docs/EMBER_REQUIREMENTS.md](docs/EMBER_REQUIREMENTS.md) and [docs/FFMPEG_PO
 - Typed builders for audio extraction, screenshot extraction, and media probing
 - Native `MediaInput` + `VideoDecoder` / `AudioDecoder` (no process spawn)
 - `VideoConverter` (libswscale) for YUV/NV12 → packed RGBA
+- `Demuxer` + packet-driven video/audio decode for shared A/V
 - Explicit frame ownership ([docs/FRAME_LIFETIME.md](docs/FRAME_LIFETIME.md))
 - Safe argument-list command construction (not shell strings)
 - Validation before FFmpeg starts

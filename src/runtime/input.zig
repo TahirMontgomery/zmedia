@@ -74,6 +74,13 @@ pub const MediaInput = struct {
             return interruptError(interrupt_state.reason);
         }
 
+        // Drop open-time callback — its opaque pointed at this stack frame.
+        // Demuxer / nextFrame install a stable callback for later reads.
+        format_ctx.?.interrupt_callback = .{
+            .callback = null,
+            .@"opaque" = null,
+        };
+
         const ctx = format_ctx.?;
         const count: usize = ctx.nb_streams;
         var list: std.ArrayList(StreamInfo) = .empty;

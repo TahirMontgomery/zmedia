@@ -287,6 +287,153 @@ test "mid-gray yuv444p converts to mid-range rgb" {
     try std.testing.expectEqual(@as(u8, 255), px[3]);
 }
 
+test "demux feeds video and audio without dropping either stream" {
+    var input = try zmedia.MediaInput.open(std.testing.allocator, "fixtures/sample.mp4");
+    defer input.deinit();
+
+    const video_index = input.firstStreamOfKind(.video) orelse return error.SkipZigTest;
+    const audio_index = input.firstStreamOfKind(.audio) orelse return error.SkipZigTest;
+
+    var video = try zmedia.VideoDecoder.init(std.testing.allocator, &input, video_index);
+    defer video.deinit();
+    var audio = try zmedia.AudioDecoder.init(std.testing.allocator, &input, audio_index);
+    defer audio.deinit();
+
+    var demux = zmedia.Demuxer.init(&input);
+    defer demux.deinit();
+
+    var video_frames: usize = 0;
+    var audio_frames: usize = 0;
+    var video_packets: usize = 0;
+    var audio_packets: usize = 0;
+
+    while (true) {
+        var pkt = (try demux.nextPacket()) orelse break;
+        defer pkt.deinit();
+        if (pkt.stream_index == video_index) {
+            video_packets += 1;
+            try video.sendPacket(&pkt);
+            while (try video.receiveFrame()) |frame_const| {
+                var frame = frame_const;
+                defer frame.deinit();
+                video_frames += 1;
+            }
+        } else if (pkt.stream_index == audio_index) {
+            audio_packets += 1;
+            try audio.sendPacket(&pkt);
+            while (try audio.receiveFrame()) |frame_const| {
+                var frame = frame_const;
+                defer frame.deinit();
+                audio_frames += 1;
+            }
+        }
+    }
+
+    try video.sendFlush();
+    try audio.sendFlush();
+    while (try video.receiveFrame()) |frame_const| {
+        var frame = frame_const;
+        defer frame.deinit();
+        video_frames += 1;
+    }
+    while (try audio.receiveFrame()) |frame_const| {
+        var frame = frame_const;
+        defer frame.deinit();
+        audio_frames += 1;
+    }
+
+    try std.testing.expect(video_packets > 0);
+    try std.testing.expect(audio_packets > 0);
+    try std.testing.expect(video_frames >= 1);
+    try std.testing.expect(audio_frames >= 1);
+    // ~5s @ 30fps → on the order of 100+ video frames when fully drained
+    try std.testing.expect(video_frames >= 10);
+}
+
+test "nextFrame video-only convenience still works" {
+    var input = try zmedia.MediaInput.open(std.testing.allocator, "fixtures/sample.mp4");
+    defer input.deinit();
+    const video_index = input.firstStreamOfKind(.video) orelse return error.SkipZigTest;
+    var decoder = try zmedia.VideoDecoder.init(std.testing.allocator, &input, video_index);
+    defer decoder.deinit();
+    var frame = try decoder.nextFrame() orelse return error.TestUnexpectedResult;
+    defer frame.deinit();
+    try std.testing.expect(frame.width > 0);
+}
+
+test "AudioResampler convert flush and second flush empty" {
+    var input = try zmedia.MediaInput.open(std.testing.allocator, "fixtures/sample.mp4");
+    defer input.deinit();
+    const audio_index = input.firstStreamOfKind(.audio) orelse return error.SkipZigTest;
+    var decoder = try zmedia.AudioDecoder.init(std.testing.allocator, &input, audio_index);
+    defer decoder.deinit();
+
+    var frame = try decoder.nextFrame() orelse return error.TestUnexpectedResult;
+    defer frame.deinit();
+
+    var resampler = try zmedia.AudioResampler.init(
+        48_000,
+        .s16,
+        .stereo,
+        frame.sample_rate,
+        frame.format,
+        frame.channel_layout,
+    );
+    defer resampler.deinit();
+
+    var converted = try resampler.convert(std.testing.allocator, &frame);
+    defer converted.deinit();
+    try std.testing.expect(converted.sample_count > 0);
+    try std.testing.expectEqual(@as(u32, 48_000), converted.sample_rate);
+
+    var flush_total: u32 = 0;
+    while (true) {
+        var tail = (try resampler.flush(std.testing.allocator)) orelse break;
+        defer tail.deinit();
+        flush_total += tail.sample_count;
+        try std.testing.expectEqual(converted.timestamp.microseconds, tail.timestamp.microseconds);
+    }
+    // Delay may be zero for some configs; either way further flush is empty.
+    try std.testing.expect(flush_total >= 0);
+    try std.testing.expect((try resampler.flush(std.testing.allocator)) == null);
+}
+
+test "AudioResampler convertInto rejects undersized buffer" {
+    var input = try zmedia.MediaInput.open(std.testing.allocator, "fixtures/sample.mp4");
+    defer input.deinit();
+    const audio_index = input.firstStreamOfKind(.audio) orelse return error.SkipZigTest;
+    var decoder = try zmedia.AudioDecoder.init(std.testing.allocator, &input, audio_index);
+    defer decoder.deinit();
+    var frame = try decoder.nextFrame() orelse return error.TestUnexpectedResult;
+    defer frame.deinit();
+
+    var resampler = try zmedia.AudioResampler.init(
+        48_000,
+        .s16,
+        .stereo,
+        frame.sample_rate,
+        frame.format,
+        frame.channel_layout,
+    );
+    defer resampler.deinit();
+
+    var tiny: [4]u8 = undefined;
+    try std.testing.expectError(error.BufferTooSmall, resampler.convertInto(&frame, &tiny));
+}
+
+test "cancel during demux returns Cancelled" {
+    var input = try zmedia.MediaInput.open(std.testing.allocator, "fixtures/sample.mp4");
+    defer input.deinit();
+
+    var cancel = zmedia.CancelToken.init();
+    var demux = zmedia.Demuxer.initWithOptions(&input, .{ .cancel = &cancel });
+    defer demux.deinit();
+
+    // Pre-cancel before next read.
+    cancel.requestCancel();
+    try std.testing.expectError(error.Cancelled, demux.nextPacket());
+}
+
 fn makeMidGrayYuv444(allocator: std.mem.Allocator, width: u32, height: u32) !zmedia.VideoFrame {
     const plane_bytes = @as(usize, width) * @as(usize, height);
     const owned = try allocator.alloc(u8, plane_bytes * 3);
