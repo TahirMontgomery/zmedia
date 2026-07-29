@@ -77,3 +77,115 @@ test "AudioResampler converts decoded audio" {
     try std.testing.expect(converted.channel_layout == .stereo);
     try std.testing.expect(converted.sample_count > 0);
 }
+
+test "openWithOptions pre-cancelled token returns Cancelled" {
+    var cancel = zmedia.CancelToken.init();
+    cancel.requestCancel();
+
+    const result = zmedia.MediaInput.openWithOptions(std.testing.allocator, "fixtures/sample.mp4", .{
+        .cancel = &cancel,
+    });
+    try std.testing.expectError(error.Cancelled, result);
+}
+
+test "openWithOptions cancel during hanging tcp open" {
+    const listener = try listenLocalhost();
+    defer _ = std.c.close(listener.fd);
+
+    var url_buf: [64]u8 = undefined;
+    const url = try std.fmt.bufPrint(&url_buf, "tcp://127.0.0.1:{d}", .{listener.port});
+
+    var cancel = zmedia.CancelToken.init();
+    const Ctx = struct {
+        path: []const u8,
+        cancel: *zmedia.CancelToken,
+        err: ?anyerror = null,
+    };
+    var ctx: Ctx = .{
+        .path = url,
+        .cancel = &cancel,
+    };
+
+    const thread = try std.Thread.spawn(.{}, struct {
+        fn run(c: *Ctx) void {
+            var input = zmedia.MediaInput.openWithOptions(std.testing.allocator, c.path, .{
+                .cancel = c.cancel,
+            }) catch |err| {
+                c.err = err;
+                return;
+            };
+            input.deinit();
+        }
+    }.run, .{&ctx});
+
+    sleepMs(100);
+    cancel.requestCancel();
+    thread.join();
+
+    try std.testing.expect(ctx.err != null);
+    try std.testing.expect(ctx.err.? == error.Cancelled);
+}
+
+test "openWithOptions timeout during hanging tcp open" {
+    const listener = try listenLocalhost();
+    defer _ = std.c.close(listener.fd);
+
+    var url_buf: [64]u8 = undefined;
+    const url = try std.fmt.bufPrint(&url_buf, "tcp://127.0.0.1:{d}", .{listener.port});
+
+    const result = zmedia.MediaInput.openWithOptions(std.testing.allocator, url, .{
+        .timeout_ns = 100 * std.time.ns_per_ms,
+    });
+    try std.testing.expectError(error.TimedOut, result);
+}
+
+test "open still works without options" {
+    var input = try zmedia.MediaInput.open(std.testing.allocator, "fixtures/sample.mp4");
+    defer input.deinit();
+    try std.testing.expect(input.streamInfos().len >= 1);
+}
+
+const Listener = struct {
+    fd: std.c.fd_t,
+    port: u16,
+};
+
+fn listenLocalhost() !Listener {
+    const fd = std.c.socket(std.c.AF.INET, std.c.SOCK.STREAM, 0);
+    if (fd < 0) return error.SocketError;
+    errdefer _ = std.c.close(fd);
+
+    var yes: c_int = 1;
+    _ = std.c.setsockopt(
+        fd,
+        std.c.SOL.SOCKET,
+        std.c.SO.REUSEADDR,
+        &yes,
+        @sizeOf(c_int),
+    );
+
+    var addr = std.c.sockaddr.in{
+        .port = 0,
+        .addr = std.mem.nativeToBig(u32, 0x7f000001),
+    };
+    if (std.c.bind(fd, @ptrCast(&addr), @sizeOf(@TypeOf(addr))) != 0) {
+        return error.BindFailed;
+    }
+    if (std.c.listen(fd, 1) != 0) return error.ListenFailed;
+
+    var len: std.c.socklen_t = @sizeOf(std.c.sockaddr.in);
+    if (std.c.getsockname(fd, @ptrCast(&addr), &len) != 0) return error.GetSockNameFailed;
+
+    return .{
+        .fd = fd,
+        .port = std.mem.bigToNative(u16, addr.port),
+    };
+}
+
+fn sleepMs(ms: u64) void {
+    const ts = std.c.timespec{
+        .sec = @intCast(ms / 1000),
+        .nsec = @intCast((ms % 1000) * std.time.ns_per_ms),
+    };
+    _ = std.c.nanosleep(&ts, null);
+}

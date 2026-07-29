@@ -18,7 +18,12 @@ pub const MediaError = error{
     StreamNotFound,
     Unsupported,
     BufferTooSmall,
+    /// FFmpeg AVERROR(ETIMEDOUT) / network timeout from demuxer.
     Timeout,
+    /// OpenOptions.timeout_ns fired during MediaInput.openWithOptions.
+    TimedOut,
+    /// CancelToken was signaled during MediaInput.openWithOptions.
+    Cancelled,
     Exit,
     Bug,
     Unknown,

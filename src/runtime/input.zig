@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const c = @import("ffmpeg_c");
+const cancel_mod = @import("cancel.zig");
 const errors = @import("../internal/errors.zig");
 const formats = @import("../formats/root.zig");
 const stream_mod = @import("stream.zig");
@@ -9,6 +10,11 @@ const stream_mod = @import("stream.zig");
 const MediaError = errors.MediaError;
 const StreamInfo = stream_mod.StreamInfo;
 const StreamKind = stream_mod.StreamKind;
+const CancelToken = cancel_mod.CancelToken;
+const OpenOptions = cancel_mod.OpenOptions;
+const InterruptState = cancel_mod.InterruptState;
+
+pub const cancel = cancel_mod;
 
 /// Open media file via libavformat. FFmpeg types stay private.
 pub const MediaInput = struct {
@@ -17,23 +23,56 @@ pub const MediaInput = struct {
     format_ctx: ?*c.AVFormatContext,
     streams: []StreamInfo,
 
+    /// Thin wrapper: `openWithOptions(allocator, path, .{})`.
     pub fn open(allocator: Allocator, path: []const u8) MediaError!MediaInput {
+        return openWithOptions(allocator, path, .{});
+    }
+
+    pub fn openWithOptions(
+        allocator: Allocator,
+        path: []const u8,
+        options: OpenOptions,
+    ) MediaError!MediaInput {
         if (path.len == 0) return error.InvalidArgument;
+
+        var interrupt_state = InterruptState.fromOptions(options);
+        if (interrupt_state.shouldAbort()) {
+            return interruptError(interrupt_state.reason);
+        }
 
         const path_z = allocator.dupeZ(u8, path) catch return error.OutOfMemory;
         defer allocator.free(path_z);
 
-        var format_ctx: ?*c.AVFormatContext = null;
+        var format_ctx: ?*c.AVFormatContext = c.avformat_alloc_context();
+        if (format_ctx == null) return error.OutOfMemory;
+        errdefer closeFormat(&format_ctx);
+
+        format_ctx.?.interrupt_callback = .{
+            .callback = interruptCallback,
+            .@"opaque" = &interrupt_state,
+        };
+
+        if (interrupt_state.shouldAbort()) {
+            return interruptError(interrupt_state.reason);
+        }
+
         const open_rc = c.avformat_open_input(&format_ctx, path_z.ptr, null, null);
-        if (open_rc < 0) return errors.fromAvError(open_rc);
-        errdefer {
-            var tmp: [*c]c.AVFormatContext = format_ctx;
-            c.avformat_close_input(&tmp);
-            format_ctx = null;
+        if (open_rc < 0) {
+            return mapOpenError(open_rc, &interrupt_state);
+        }
+
+        if (interrupt_state.shouldAbort()) {
+            return interruptError(interrupt_state.reason);
         }
 
         const find_rc = c.avformat_find_stream_info(format_ctx, null);
-        if (find_rc < 0) return errors.fromAvError(find_rc);
+        if (find_rc < 0) {
+            return mapOpenError(find_rc, &interrupt_state);
+        }
+
+        if (interrupt_state.shouldAbort()) {
+            return interruptError(interrupt_state.reason);
+        }
 
         const ctx = format_ctx.?;
         const count: usize = ctx.nb_streams;
@@ -46,6 +85,10 @@ pub const MediaInput = struct {
         list.ensureTotalCapacity(allocator, count) catch return error.OutOfMemory;
         var i: usize = 0;
         while (i < count) : (i += 1) {
+            if (interrupt_state.shouldAbort()) {
+                return interruptError(interrupt_state.reason);
+            }
+
             const st = ctx.streams[i].*;
             const params = st.codecpar.*;
             const codec = c.avcodec_find_decoder(params.codec_id);
@@ -107,11 +150,7 @@ pub const MediaInput = struct {
     }
 
     pub fn deinit(self: *MediaInput) void {
-        if (self.format_ctx != null) {
-            var tmp: [*c]c.AVFormatContext = self.format_ctx;
-            c.avformat_close_input(&tmp);
-            self.format_ctx = null;
-        }
+        closeFormat(&self.format_ctx);
         for (self.streams) |*s| {
             s.deinit(self.allocator);
         }
@@ -136,6 +175,35 @@ pub const MediaInput = struct {
         return self.format_ctx.?;
     }
 };
+
+fn closeFormat(format_ctx: *?*c.AVFormatContext) void {
+    if (format_ctx.* == null) return;
+    var tmp: [*c]c.AVFormatContext = format_ctx.*;
+    c.avformat_close_input(&tmp);
+    format_ctx.* = null;
+}
+
+fn interruptCallback(opaque_ptr: ?*anyopaque) callconv(.c) c_int {
+    if (opaque_ptr == null) return 0;
+    const state: *InterruptState = @ptrCast(@alignCast(opaque_ptr));
+    return if (state.shouldAbort()) 1 else 0;
+}
+
+fn interruptError(reason: cancel_mod.InterruptReason) MediaError {
+    return switch (reason) {
+        .cancelled => error.Cancelled,
+        .timed_out => error.TimedOut,
+        .none => error.Unknown,
+    };
+}
+
+fn mapOpenError(errnum: c_int, state: *const InterruptState) MediaError {
+    return switch (state.reason) {
+        .cancelled => error.Cancelled,
+        .timed_out => error.TimedOut,
+        .none => errors.fromAvError(errnum),
+    };
+}
 
 fn kindFrom(codec_type: c.AVMediaType) StreamKind {
     return switch (codec_type) {

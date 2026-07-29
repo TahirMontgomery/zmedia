@@ -42,3 +42,9 @@ Paths are auto-detected via `pkg-config`, then common Homebrew/system prefixes.
 
 C headers are translated through [`src/internal/bindings/ffmpeg.h`](../src/internal/bindings/ffmpeg.h).
 The generated module is imported as `ffmpeg_c` and must never be re-exported from the public API.
+
+## Open cancellation
+
+`MediaInput.openWithOptions` uses FFmpeg’s `AVFormatContext.interrupt_callback`
+(`AVIOInterruptCB`) to honor `CancelToken` and optional `timeout_ns`. See
+[docs/handoffs/ember-open-cancellation.md](handoffs/ember-open-cancellation.md).

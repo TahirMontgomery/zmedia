@@ -23,6 +23,8 @@ pub const FrameStorage = @import("frame.zig").FrameStorage;
 pub const VideoDecoder = @import("decoder.zig").VideoDecoder;
 pub const AudioDecoder = @import("decoder.zig").AudioDecoder;
 pub const AudioResampler = @import("resampler.zig").AudioResampler;
+pub const CancelToken = @import("cancel.zig").CancelToken;
+pub const OpenOptions = @import("cancel.zig").OpenOptions;
 
 /// Linked libavutil version string (never exposes C types).
 pub fn ffmpegVersion() []const u8 {
