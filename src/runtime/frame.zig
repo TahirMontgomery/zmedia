@@ -12,18 +12,20 @@ const Timestamp = time.Timestamp;
 const Rational = formats.Rational;
 
 pub const Plane = struct {
+    /// Usable bytes for this plane (`len` matches chroma / packed geometry).
     data: []const u8,
+    /// Row stride in bytes; may include padding beyond active width.
     line_size: usize,
 };
 
 pub const FrameStorage = union(enum) {
     /// Frame memory owned by an AVFrame; valid until `deinit`.
     borrowed_avframe: *c.AVFrame,
-    /// Contiguous owned sample buffer for converted audio.
+    /// Contiguous owned buffer (audio samples or converted video pixels).
     owned_bytes: []u8,
 };
 
-/// Decoded video frame suitable for GPU upload.
+/// Decoded or converted video frame.
 ///
 /// Lifetime: after `deinit`, plane pointers are invalid.
 /// See docs/FRAME_LIFETIME.md.
@@ -75,6 +77,33 @@ pub const AudioFrame = struct {
     }
 };
 
+/// Byte length of plane `plane_index` for an image of `height` with the given
+/// linesizes. Uses FFmpeg chroma log2 factors (420/422/444/NV12/packed).
+pub fn planeByteLength(
+    pix_fmt: c_int,
+    height: c_int,
+    linesizes: *const [4]c.ptrdiff_t,
+    plane_index: usize,
+) usize {
+    var sizes: [4]usize = .{ 0, 0, 0, 0 };
+    const rc = c.av_image_fill_plane_sizes(&sizes, pix_fmt, height, linesizes);
+    if (rc < 0) {
+        // Fallback: luma full height; chroma CEIL_RSHIFT by log2_chroma_h.
+        const desc = c.av_pix_fmt_desc_get(pix_fmt);
+        const line: usize = @intCast(@max(linesizes[plane_index], 0));
+        if (desc == null or plane_index == 0) {
+            return line * @as(usize, @intCast(@max(height, 0)));
+        }
+        const shift: u6 = @intCast(desc.*.log2_chroma_h);
+        const chroma_h = if (shift == 0)
+            @as(usize, @intCast(@max(height, 0)))
+        else
+            (@as(usize, @intCast(@max(height, 0))) + (@as(usize, 1) << shift) - 1) >> shift;
+        return line * chroma_h;
+    }
+    return sizes[plane_index];
+}
+
 pub fn videoFromAv(
     allocator: Allocator,
     frame: *c.AVFrame,
@@ -89,11 +118,16 @@ pub fn videoFromAv(
     var planes = try allocator.alloc(Plane, plane_count);
     errdefer allocator.free(planes);
 
+    var linesizes: [4]c.ptrdiff_t = .{ 0, 0, 0, 0 };
+    var li: usize = 0;
+    while (li < 4) : (li += 1) {
+        linesizes[li] = frame.linesize[li];
+    }
+
     var i: usize = 0;
     while (i < plane_count) : (i += 1) {
         const line_size: usize = @intCast(@max(frame.linesize[i], 0));
-        const plane_height: usize = if (i == 0) height else @max(height / 2, 1);
-        const len = line_size * plane_height;
+        const len = planeByteLength(frame.format, @intCast(height), &linesizes, i);
         const ptr = frame.data[i];
         planes[i] = .{
             .data = if (ptr != null and len > 0) ptr[0..len] else &.{},

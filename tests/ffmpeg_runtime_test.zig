@@ -145,6 +145,174 @@ test "open still works without options" {
     try std.testing.expect(input.streamInfos().len >= 1);
 }
 
+test "yuv444p plane lengths and convert to rgba" {
+    var input = try zmedia.MediaInput.open(std.testing.allocator, "fixtures/sample.mp4");
+    defer input.deinit();
+
+    const video_index = input.firstStreamOfKind(.video) orelse return error.SkipZigTest;
+    var decoder = try zmedia.VideoDecoder.init(std.testing.allocator, &input, video_index);
+    defer decoder.deinit();
+
+    var frame = try decoder.nextFrame() orelse return error.TestUnexpectedResult;
+    defer frame.deinit();
+
+    try std.testing.expect(frame.format == .yuv444p);
+    try std.testing.expectEqual(@as(usize, 3), frame.planes.len);
+    try std.testing.expect(frame.planes[1].data.len >= frame.planes[1].line_size * frame.height);
+    try std.testing.expect(frame.planes[2].data.len >= frame.planes[2].line_size * frame.height);
+
+    var converter = try zmedia.VideoConverter.init(
+        std.testing.allocator,
+        frame.format,
+        frame.width,
+        frame.height,
+        .rgba,
+    );
+    defer converter.deinit();
+
+    var rgba = try converter.convert(&frame);
+    defer rgba.deinit();
+
+    const expected = zmedia.dstByteLength(frame.width, frame.height, .rgba);
+    try std.testing.expectEqual(expected, rgba.planes[0].data.len);
+    try std.testing.expectEqual(@as(usize, frame.width * 4), rgba.planes[0].line_size);
+    try std.testing.expect(rgba.format == .rgba);
+}
+
+test "yuv420p plane lengths and convert to rgba" {
+    var input = try zmedia.MediaInput.open(std.testing.allocator, "fixtures/sample_yuv420p.mp4");
+    defer input.deinit();
+
+    const video_index = input.firstStreamOfKind(.video) orelse return error.SkipZigTest;
+    var decoder = try zmedia.VideoDecoder.init(std.testing.allocator, &input, video_index);
+    defer decoder.deinit();
+
+    var frame = try decoder.nextFrame() orelse return error.TestUnexpectedResult;
+    defer frame.deinit();
+
+    try std.testing.expect(frame.format == .yuv420p);
+    try std.testing.expectEqual(@as(usize, 3), frame.planes.len);
+    const chroma_h = @max(frame.height / 2, 1);
+    try std.testing.expect(frame.planes[1].data.len >= frame.planes[1].line_size * chroma_h);
+    try std.testing.expect(frame.planes[2].data.len >= frame.planes[2].line_size * chroma_h);
+
+    var converter = try zmedia.VideoConverter.init(
+        std.testing.allocator,
+        frame.format,
+        frame.width,
+        frame.height,
+        .rgba,
+    );
+    defer converter.deinit();
+
+    var rgba = try converter.convert(&frame);
+    defer rgba.deinit();
+    try std.testing.expectEqual(
+        zmedia.dstByteLength(frame.width, frame.height, .rgba),
+        rgba.planes[0].data.len,
+    );
+}
+
+test "convertInto rejects wrong out.len" {
+    var input = try zmedia.MediaInput.open(std.testing.allocator, "fixtures/sample.mp4");
+    defer input.deinit();
+    const video_index = input.firstStreamOfKind(.video) orelse return error.SkipZigTest;
+    var decoder = try zmedia.VideoDecoder.init(std.testing.allocator, &input, video_index);
+    defer decoder.deinit();
+    var frame = try decoder.nextFrame() orelse return error.TestUnexpectedResult;
+    defer frame.deinit();
+
+    var converter = try zmedia.VideoConverter.init(
+        std.testing.allocator,
+        frame.format,
+        frame.width,
+        frame.height,
+        .rgba,
+    );
+    defer converter.deinit();
+
+    var tiny: [16]u8 = undefined;
+    try std.testing.expectError(error.InvalidArgument, converter.convertInto(&frame, &tiny));
+}
+
+test "converted owned frame survives source deinit" {
+    var input = try zmedia.MediaInput.open(std.testing.allocator, "fixtures/sample.mp4");
+    defer input.deinit();
+    const video_index = input.firstStreamOfKind(.video) orelse return error.SkipZigTest;
+    var decoder = try zmedia.VideoDecoder.init(std.testing.allocator, &input, video_index);
+    defer decoder.deinit();
+
+    var src = try decoder.nextFrame() orelse return error.TestUnexpectedResult;
+    var converter = try zmedia.VideoConverter.init(
+        std.testing.allocator,
+        src.format,
+        src.width,
+        src.height,
+        .rgba,
+    );
+    defer converter.deinit();
+
+    var rgba = try converter.convert(&src);
+    defer rgba.deinit();
+    src.deinit();
+
+    try std.testing.expect(rgba.planes[0].data.len > 0);
+    // Touch pixels after source release (must not crash / UAF under ASan).
+    std.mem.doNotOptimizeAway(rgba.planes[0].data[0]);
+}
+
+test "mid-gray yuv444p converts to mid-range rgb" {
+    const width: u32 = 2;
+    const height: u32 = 2;
+    var src = try makeMidGrayYuv444(std.testing.allocator, width, height);
+    defer src.deinit();
+
+    var converter = try zmedia.VideoConverter.init(
+        std.testing.allocator,
+        .yuv444p,
+        width,
+        height,
+        .rgba,
+    );
+    defer converter.deinit();
+
+    var rgba = try converter.convert(&src);
+    defer rgba.deinit();
+
+    const px = rgba.planes[0].data;
+    // Y=U=V=128 → roughly mid gray under BT.601 limited; not 0/255 clipped.
+    try std.testing.expect(px[0] > 64 and px[0] < 192);
+    try std.testing.expect(px[1] > 64 and px[1] < 192);
+    try std.testing.expect(px[2] > 64 and px[2] < 192);
+    try std.testing.expectEqual(@as(u8, 255), px[3]);
+}
+
+fn makeMidGrayYuv444(allocator: std.mem.Allocator, width: u32, height: u32) !zmedia.VideoFrame {
+    const plane_bytes = @as(usize, width) * @as(usize, height);
+    const owned = try allocator.alloc(u8, plane_bytes * 3);
+    errdefer allocator.free(owned);
+    @memset(owned[0..plane_bytes], 128); // Y
+    @memset(owned[plane_bytes .. plane_bytes * 2], 128); // U
+    @memset(owned[plane_bytes * 2 .. plane_bytes * 3], 128); // V
+
+    const planes = try allocator.alloc(zmedia.runtime.Plane, 3);
+    errdefer allocator.free(planes);
+    const stride = width;
+    planes[0] = .{ .data = owned[0..plane_bytes], .line_size = stride };
+    planes[1] = .{ .data = owned[plane_bytes .. plane_bytes * 2], .line_size = stride };
+    planes[2] = .{ .data = owned[plane_bytes * 2 .. plane_bytes * 3], .line_size = stride };
+
+    return .{
+        .format = .yuv444p,
+        .width = width,
+        .height = height,
+        .timestamp = zmedia.Timestamp.fromSeconds(0),
+        .planes = planes,
+        .storage = .{ .owned_bytes = owned },
+        .allocator = allocator,
+    };
+}
+
 const Listener = struct {
     fd: std.c.fd_t,
     port: u16,

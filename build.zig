@@ -42,6 +42,7 @@ pub fn build(b: *std.Build) void {
         mod.linkSystemLibrary("avcodec", .{});
         mod.linkSystemLibrary("avutil", .{});
         mod.linkSystemLibrary("swresample", .{});
+        mod.linkSystemLibrary("swscale", .{});
     }
 
     const exe = b.addExecutable(.{

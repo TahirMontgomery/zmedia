@@ -30,7 +30,8 @@ jobs:
             libavformat-dev \
             libavcodec-dev \
             libavutil-dev \
-            libswresample-dev
+            libswresample-dev \
+            libswscale-dev
 
       - name: Install FFmpeg (macOS)
         if: runner.os == 'macOS'

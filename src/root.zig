@@ -70,12 +70,16 @@ pub const AudioFrame = runtime.AudioFrame;
 pub const VideoDecoder = runtime.VideoDecoder;
 pub const AudioDecoder = runtime.AudioDecoder;
 pub const AudioResampler = runtime.AudioResampler;
+pub const VideoConverter = runtime.VideoConverter;
 pub const CancelToken = runtime.CancelToken;
 pub const OpenOptions = runtime.OpenOptions;
 pub const PixelFormat = formats.PixelFormat;
 pub const SampleFormat = formats.SampleFormat;
 pub const ChannelLayout = formats.ChannelLayout;
 pub const MediaError = @import("internal/errors.zig").MediaError;
+
+pub const dstByteLength = runtime.dstByteLength;
+pub const convertVideoFrame = runtime.convertVideoFrame;
 
 pub fn audioExtraction(input_path: []const u8) AudioExtraction {
     return AudioExtraction.init(input_path);

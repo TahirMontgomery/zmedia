@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-zmedia targets **FFmpeg 6.x and 7.x** libraries (`libavformat`, `libavcodec`, `libavutil`, `libswresample`).
+zmedia targets **FFmpeg 6.x and 7.x** libraries (`libavformat`, `libavcodec`, `libavutil`, `libswresample`, `libswscale`).
 
 Development is validated against Homebrew FFmpeg 7.1 on macOS. CI installs distro FFmpeg
 development packages on Ubuntu and Homebrew FFmpeg on macOS runners.
@@ -23,6 +23,7 @@ sudo apt-get install -y \
   libavcodec-dev \
   libavutil-dev \
   libswresample-dev \
+  libswscale-dev \
   pkg-config
 ```
 
