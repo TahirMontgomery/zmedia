@@ -25,6 +25,9 @@ AudioResampler.flush → drain delay samples
 `Packet` alive through `sendPacket` and then calls `Packet.deinit`. The decoder does not
 take ownership or free the caller’s `AVPacket`.
 
+If `sendPacket` / `sendFlush` returns `error.WouldBlock`, drain with `receiveFrame` and
+retry the send.
+
 ## VideoFrame (decoded)
 
 `VideoDecoder.receiveFrame` / `nextFrame` returns a `VideoFrame` whose pixel planes borrow
@@ -39,8 +42,19 @@ Rules:
 
 ### Plane sizing
 
-`Plane.data.len` is the usable byte length for that plane. See chroma table in prior docs /
-`av_image_fill_plane_sizes`. Prefer `.len` for bounds checks; `line_size` for row strides.
+`Plane.data.len` is the usable byte length for that plane (including row padding implied by
+`line_size × plane_height`). Heights/widths follow the pixel format’s chroma subsampling
+(`av_image_fill_plane_sizes` / `log2_chroma_*`):
+
+| Format | Luma | Chroma height | Notes |
+|---|---|---|---|
+| `yuv420p` / `nv12` | H | H/2 | nv12: semi-planar UV in plane 1 |
+| `yuv422p` | H | H | chroma width W/2 |
+| `yuv444p` | H | H | full chroma |
+| `rgba` / `rgb24` / … | H | n/a | single packed plane |
+
+`line_size` may be larger than the active row width (alignment padding). Prefer
+`plane.data.len` for bounds checks; use `line_size` for row strides.
 
 ## VideoFrame (converted)
 

@@ -77,8 +77,7 @@ pub const Demuxer = struct {
             return null;
         }
         if (read_rc < 0) {
-            var tmp: [*c]c.AVPacket = pkt;
-            c.av_packet_free(&tmp);
+            // errdefer owns cleanup on error returns — do not free here.
             if (self.interrupt_state.reason != .none) {
                 return interruptError(self.interrupt_state.reason);
             }

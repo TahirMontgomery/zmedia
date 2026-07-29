@@ -18,6 +18,9 @@ pub const MediaError = error{
     StreamNotFound,
     Unsupported,
     BufferTooSmall,
+    /// Codec/filter backpressure (`AVERROR(EAGAIN)`): drain via `receiveFrame` / consume
+    /// output, then retry the send. Distinct from open-time `TimedOut` / `Cancelled`.
+    WouldBlock,
     /// FFmpeg AVERROR(ETIMEDOUT) / network timeout from demuxer.
     Timeout,
     /// OpenOptions.timeout_ns fired during MediaInput.openWithOptions.
@@ -71,6 +74,7 @@ pub fn fromAvError(errnum: c_int) MediaError {
         averror_stream_not_found => error.StreamNotFound,
         c.AVERROR(c.ENOSYS), averror_patchwelcome => error.Unsupported,
         averror_buffer_too_small => error.BufferTooSmall,
+        c.AVERROR(c.EAGAIN) => error.WouldBlock,
         c.AVERROR(c.ETIMEDOUT) => error.Timeout,
         averror_exit => error.Exit,
         averror_bug, averror_bug2 => error.Bug,

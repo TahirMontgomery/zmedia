@@ -7,6 +7,7 @@
 - Packet-driven `VideoDecoder` / `AudioDecoder`: `sendPacket` (borrow), `sendFlush`,
   `receiveFrame`; `setCancel` for convenience `nextFrame`
 - `AudioResampler.flush` / `flushInto` / `convertInto` and `ConvertIntoResult`
+- `MediaError.WouldBlock` for codec send backpressure (`AVERROR(EAGAIN)`)
 - Sprint 4 handoff: `docs/handoffs/ember-sprint4-av-demux.md`
 
 ### Changed

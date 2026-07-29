@@ -161,9 +161,14 @@ pub const VideoDecoder = struct {
         if (receive_rc == 0) {
             return try frame_mod.videoFromAv(self.allocator, frame, self.time_base);
         }
-        freeFrame(frame);
-        if (receive_rc == c.AVERROR(c.EAGAIN)) return null;
+        // EAGAIN/EOF return null (success) — free explicitly; errdefer does not run.
+        // Hard errors return under errdefer — do not free here (avoids double-free).
+        if (receive_rc == c.AVERROR(c.EAGAIN)) {
+            freeFrame(frame);
+            return null;
+        }
         if (receive_rc == errors.averror_eof) {
+            freeFrame(frame);
             self.eof = true;
             return null;
         }
@@ -308,9 +313,14 @@ pub const AudioDecoder = struct {
         if (receive_rc == 0) {
             return try frame_mod.audioFromAv(self.allocator, frame, self.time_base);
         }
-        freeFrame(frame);
-        if (receive_rc == c.AVERROR(c.EAGAIN)) return null;
+        // EAGAIN/EOF return null (success) — free explicitly; errdefer does not run.
+        // Hard errors return under errdefer — do not free here (avoids double-free).
+        if (receive_rc == c.AVERROR(c.EAGAIN)) {
+            freeFrame(frame);
+            return null;
+        }
         if (receive_rc == errors.averror_eof) {
+            freeFrame(frame);
             self.eof = true;
             return null;
         }
